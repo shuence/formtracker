@@ -233,11 +233,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   if (message.type === 'GET_SETTINGS') {
     chrome.storage.local.get(['settings']).then(result => {
-      safeSendResponse(sendResponse, { settings: result.settings || {} });
+      // Ensure settings object always exists with defaults
+      const settings = result.settings || {
+        emailEnabled: true
+      };
+      safeSendResponse(sendResponse, { settings });
     }).catch(error => {
-      safeSendResponse(sendResponse, { settings: {}, error: error.message });
+      console.error('FormTrack: Error getting settings', error);
+      // Return default settings on error
+      safeSendResponse(sendResponse, { 
+        settings: {
+          emailEnabled: true
+        } 
+      });
     });
-    return true;
+    return true; // Keep channel open for async response
   }
   
   if (message.type === 'SET_SETTINGS') {

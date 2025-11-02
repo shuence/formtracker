@@ -297,28 +297,46 @@ const emailEnabled = document.getElementById('emailEnabled');
  * Load settings from storage
  */
 async function loadSettings() {
+  // Default settings to ensure we always have values
+  const defaultSettings = {
+    resendApiKey: '',
+    emailTo: '',
+    emailFrom: '',
+    emailEnabled: true
+  };
+  
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-    const settings = response.settings || {};
     
-    if (settings.resendApiKey) {
-      resendApiKey.value = settings.resendApiKey;
-    }
-    if (settings.emailTo) {
-      emailTo.value = settings.emailTo;
-    }
-    if (settings.emailFrom) {
-      emailFrom.value = settings.emailFrom;
-    }
-    if (settings.emailEnabled !== undefined) {
-      emailEnabled.checked = settings.emailEnabled;
+    // Handle case where response might be undefined or doesn't have settings
+    let settings = defaultSettings;
+    
+    if (response && response.settings && typeof response.settings === 'object') {
+      // Merge with defaults to ensure all properties exist
+      settings = { ...defaultSettings, ...response.settings };
     } else {
-      // Default to enabled for auto-send
-      emailEnabled.checked = true;
+      console.debug('FormTrack: Invalid response format, using defaults', response);
+      settings = defaultSettings;
     }
-    // emailOnSubmit is now auto-synced with emailEnabled
+    
+    // Load API key
+    resendApiKey.value = settings.resendApiKey || '';
+    
+    // Load recipient email
+    emailTo.value = settings.emailTo || '';
+    
+    // Load from email (optional)
+    emailFrom.value = settings.emailFrom || '';
+    
+    // Load email enabled setting (default to true for auto-send)
+    emailEnabled.checked = settings.emailEnabled !== undefined ? settings.emailEnabled : true;
   } catch (error) {
     console.error('Error loading settings:', error);
+    // Set defaults on error
+    resendApiKey.value = defaultSettings.resendApiKey;
+    emailTo.value = defaultSettings.emailTo;
+    emailFrom.value = defaultSettings.emailFrom;
+    emailEnabled.checked = defaultSettings.emailEnabled;
   }
 }
 
@@ -327,10 +345,31 @@ async function loadSettings() {
  */
 async function saveSettings() {
   try {
+    const apiKey = resendApiKey.value.trim();
+    const toEmail = emailTo.value.trim();
+    const fromEmail = emailFrom.value.trim();
+
+    // Basic validation
+    if (emailEnabled.checked && (!apiKey || !toEmail)) {
+      alert('Please enter both Resend API key and recipient email address to enable email notifications.');
+      return;
+    }
+
+    // Validate email format if provided
+    if (toEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)) {
+      alert('Please enter a valid recipient email address.');
+      return;
+    }
+
+    if (fromEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fromEmail)) {
+      alert('Please enter a valid "from" email address or leave it empty.');
+      return;
+    }
+
     const settings = {
-      resendApiKey: resendApiKey.value.trim(),
-      emailTo: emailTo.value.trim(),
-      emailFrom: emailFrom.value.trim() || null,
+      resendApiKey: apiKey,
+      emailTo: toEmail,
+      emailFrom: fromEmail || null,
       emailEnabled: emailEnabled.checked // Auto-send when enabled and configured
     };
 
@@ -406,11 +445,8 @@ settingsBtn.addEventListener('click', () => {
   settingsModal.style.display = 'flex';
 });
 
-// Auto-update emailOnSubmit when emailEnabled changes
-emailEnabled.addEventListener('change', () => {
-  // Auto-send is now directly tied to emailEnabled
-  // When enabled, it will auto-send if API key and email are configured
-});
+// Auto-send is directly tied to emailEnabled
+// When enabled with API key and email configured, emails send automatically
 
 closeSettingsBtn.addEventListener('click', () => {
   settingsModal.style.display = 'none';
