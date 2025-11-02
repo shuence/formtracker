@@ -266,27 +266,56 @@
   function captureGoogleFormSubmission() {
     if (!isGoogleForm()) return;
     
-    const formData = extractGoogleFormData();
+    // Try multiple times with delays to capture data
+    let attempts = 0;
+    const maxAttempts = 3;
     
-    if (Object.keys(formData).length === 0) {
-      return;
+    function attemptCapture() {
+      attempts++;
+      const formData = extractGoogleFormData();
+      
+      if (Object.keys(formData).length === 0 && attempts < maxAttempts) {
+        // Retry after a short delay
+        setTimeout(attemptCapture, 300);
+        return;
+      }
+      
+      // If still no data after attempts, try to capture from form inputs directly
+      if (Object.keys(formData).length === 0) {
+        // Last resort: capture visible form inputs
+        const allInputs = document.querySelectorAll('input[value]:not([type="submit"]):not([type="button"]), textarea[value], select option:checked');
+        allInputs.forEach(input => {
+          const value = input.value || input.textContent;
+          const name = input.getAttribute('name') || input.getAttribute('aria-label') || input.closest('[data-item-id]')?.querySelector('[role="heading"]')?.textContent || `Field_${Object.keys(formData).length + 1}`;
+          if (value && value.trim()) {
+            formData[name] = value;
+          }
+        });
+      }
+      
+      if (Object.keys(formData).length === 0) {
+        console.debug('FormTrack: No Google Form data captured');
+        return;
+      }
+
+      const submission = {
+        url: window.location.href,
+        action: window.location.href,
+        timestamp: new Date().toISOString(),
+        fields: formData,
+        title: document.title || 'Google Form',
+        source: 'google-forms'
+      };
+
+      chrome.runtime.sendMessage({
+        type: 'FORM_SUBMISSION',
+        data: submission
+      }).catch(err => {
+        console.debug('FormTrack: Could not send message', err);
+      });
     }
-
-    const submission = {
-      url: window.location.href,
-      action: window.location.href,
-      timestamp: new Date().toISOString(),
-      fields: formData,
-      title: document.title || 'Google Form',
-      source: 'google-forms'
-    };
-
-    chrome.runtime.sendMessage({
-      type: 'FORM_SUBMISSION',
-      data: submission
-    }).catch(err => {
-      console.debug('FormTrack: Could not send message', err);
-    });
+    
+    attemptCapture();
   }
 
   /**
@@ -295,46 +324,69 @@
   function setupGoogleFormMonitoring() {
     if (!isGoogleForm()) return;
 
-    // Watch for submit button clicks
+    // Watch for submit button clicks - expanded selectors for Google Forms
     const submitButtonSelectors = [
       '[jsname="M2UYVd"]', // Common Google Forms submit button
+      '[jsname*="Submit"]',
       '.freebirdFormviewerViewNavigationSubmitButton',
+      '[class*="SubmitButton"]',
+      '[class*="submitButton"]',
       'button[type="submit"]',
-      '[role="button"][aria-label*="Submit"], [role="button"][aria-label*="submit"]'
+      '[role="button"][aria-label*="Submit"]',
+      '[role="button"][aria-label*="submit"]',
+      '[role="button"][aria-label*="Submit response"]',
+      'button:has-text("Submit")',
+      'div[role="button"]:has-text("Submit")'
     ];
 
-    const observer = new MutationObserver(() => {
+    function attachListeners() {
       submitButtonSelectors.forEach(selector => {
-        const buttons = document.querySelectorAll(selector);
-        buttons.forEach(button => {
-          if (!button.dataset.formtrackWatched) {
-            button.dataset.formtrackWatched = 'true';
-            button.addEventListener('click', () => {
-              // Wait a bit for form data to be ready
-              setTimeout(captureGoogleFormSubmission, 500);
-            }, true);
-          }
-        });
+        try {
+          const buttons = document.querySelectorAll(selector);
+          buttons.forEach(button => {
+            if (!button.dataset.formtrackWatched) {
+              button.dataset.formtrackWatched = 'true';
+              // Use capture phase to intercept early
+              button.addEventListener('click', (e) => {
+                console.debug('FormTrack: Google Form submit button clicked');
+                // Capture immediately and also after delay
+                setTimeout(captureGoogleFormSubmission, 100);
+                setTimeout(captureGoogleFormSubmission, 800);
+                setTimeout(captureGoogleFormSubmission, 1500);
+              }, true);
+              
+              // Also listen for mousedown for better coverage
+              button.addEventListener('mousedown', () => {
+                setTimeout(captureGoogleFormSubmission, 500);
+              }, true);
+            }
+          });
+        } catch (err) {
+          // Some selectors might fail, ignore
+        }
       });
+    }
+
+    const observer = new MutationObserver(() => {
+      attachListeners();
     });
 
     observer.observe(document.body, {
       childList: true,
-      subtree: true
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'jsname', 'role']
     });
 
-    // Also check immediately
-    submitButtonSelectors.forEach(selector => {
-      const buttons = document.querySelectorAll(selector);
-      buttons.forEach(button => {
-        if (!button.dataset.formtrackWatched) {
-          button.dataset.formtrackWatched = 'true';
-          button.addEventListener('click', () => {
-            setTimeout(captureGoogleFormSubmission, 500);
-          }, true);
-        }
-      });
-    });
+    // Check immediately and repeatedly
+    attachListeners();
+    
+    // Check periodically for new buttons
+    setInterval(() => {
+      if (isGoogleForm()) {
+        attachListeners();
+      }
+    }, 1000);
   }
 
   /**
@@ -553,10 +605,17 @@
                                           urlStr.includes('/SubmitForm');
 
           if (isGoogleFormsEndpoint) {
-            // Capture Google Form submission
+            // Capture Google Form submission with multiple attempts
+            console.debug('FormTrack: Google Forms endpoint detected');
             setTimeout(() => {
               captureGoogleFormSubmission();
-            }, 300);
+            }, 200);
+            setTimeout(() => {
+              captureGoogleFormSubmission();
+            }, 800);
+            setTimeout(() => {
+              captureGoogleFormSubmission();
+            }, 1500);
           }
 
           if (isMicrosoftFormsEndpoint) {
