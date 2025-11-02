@@ -72,6 +72,108 @@ async function sendEmailViaResend(apiKey, emailData) {
 }
 
 /**
+ * Generate AI summary using Gemini 2.5 API
+ */
+async function generateSummaryWithGemini(apiKey, submissions, formUrl = null) {
+  try {
+    if (!apiKey) {
+      return { success: false, error: 'Gemini API key not configured' };
+    }
+
+    // Prepare prompt for Gemini
+    let prompt = `You are analyzing form submissions data. Please provide a comprehensive summary:
+    
+1. Overall Form Analysis:
+   - What type of form is this? (e.g., contact form, survey, registration, feedback)
+   - What is the purpose of this form based on the fields?
+   - What patterns do you notice in the submissions?
+
+2. Key Insights:
+   - What are the most common responses or patterns?
+   - Any notable trends or anomalies?
+   - What valuable information can be extracted?
+
+3. Summary for each submission (if analyzing individual):
+   - Brief summary of the submission
+   - Key points or highlights
+   - Any notable information
+
+Here is the form submission data:
+
+`;
+
+    if (Array.isArray(submissions) && submissions.length > 0) {
+      if (submissions.length === 1) {
+        // Single submission summary
+        const submission = submissions[0];
+        prompt += `Form URL: ${submission.url || 'Unknown'}\n`;
+        prompt += `Form Title: ${submission.title || 'Untitled'}\n`;
+        prompt += `Timestamp: ${submission.timestamp || 'Unknown'}\n`;
+        prompt += `Source: ${submission.source || 'Unknown'}\n\n`;
+        prompt += `Form Fields and Values:\n${JSON.stringify(submission.fields, null, 2)}\n\n`;
+        prompt += `Please provide a concise summary (2-3 sentences) of this submission highlighting key information.`;
+      } else {
+        // Multiple submissions - form analysis
+        prompt += `Analyzing ${submissions.length} submissions from this form:\n\n`;
+        if (formUrl) {
+          prompt += `Form URL: ${formUrl}\n\n`;
+        }
+        
+        submissions.forEach((sub, index) => {
+          prompt += `Submission ${index + 1} (${sub.timestamp || 'Unknown time'}):\n`;
+          prompt += `Fields: ${JSON.stringify(sub.fields, null, 2)}\n\n`;
+        });
+        
+        prompt += `Please provide:\n1. A summary of what type of form this is and its purpose\n2. Key patterns and trends across all submissions\n3. Notable insights or findings\n4. Any recommendations or observations`;
+      }
+    } else {
+      return { success: false, error: 'No submission data provided' };
+    }
+
+    // Call Gemini API - try Gemini 2.5 Flash, fallback to 2.0 if not available
+    const model = 'gemini-2.5-flash'; // Using Gemini 2.5 Flash, fallback to gemini-2.0-flash-exp if needed
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 2048
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+      throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+      const summaryText = data.candidates[0].content.parts[0].text;
+      return { success: true, summary: summaryText };
+    } else {
+      return { success: false, error: 'No summary generated from API' };
+    }
+  } catch (error) {
+    console.error('FormTrack: Error generating summary with Gemini', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
  * Send email notification for form submission
  */
 async function sendSubmissionEmail(submission) {
@@ -200,14 +302,34 @@ function safeSendResponse(sendResponse, data) {
     // Check if there's a runtime error (channel might be closed)
     if (chrome.runtime.lastError) {
       // Channel already closed or error occurred, ignore silently
+      console.debug('FormTrack: Cannot send response, channel closed:', chrome.runtime.lastError.message);
       return false;
     }
+    // Check if sendResponse is still a valid function
+    if (typeof sendResponse !== 'function') {
+      console.debug('FormTrack: sendResponse is not a function');
+      return false;
+    }
+    
     // Attempt to send response
+    // Note: Even if this fails, we've attempted to send, which prevents the error
     sendResponse(data);
     return true;
   } catch (error) {
     // Response already sent or channel closed - this is normal when
     // the sender doesn't wait for a response, so we silently ignore it
+    console.debug('FormTrack: Error sending response (this is normal if channel closed):', error.message);
+    return false;
+  }
+}
+
+/**
+ * Check if sendResponse callback is still valid
+ */
+function isResponseCallbackValid(sendResponse) {
+  try {
+    return typeof sendResponse === 'function' && !chrome.runtime.lastError;
+  } catch {
     return false;
   }
 }
@@ -217,18 +339,21 @@ function safeSendResponse(sendResponse, data) {
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'FORM_SUBMISSION') {
+    // Fire-and-forget: content scripts don't wait for responses
+    // Process submission in background without blocking
     saveSubmission(message.data).then(async (success) => {
-      // Send email notification if enabled
+      // Send email notification if enabled (fire-and-forget)
       if (success) {
         sendSubmissionEmail(message.data).catch(err => {
           console.debug('FormTrack: Error sending email notification', err);
         });
       }
-      safeSendResponse(sendResponse, { success });
     }).catch(error => {
-      safeSendResponse(sendResponse, { success: false, error: error.message });
+      console.debug('FormTrack: Error saving submission', error);
     });
-    return true; // Keep channel open for async response
+    
+    // Return false - no response needed, prevents channel closing errors
+    return false;
   }
   
   if (message.type === 'GET_SETTINGS') {
@@ -261,11 +386,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   
   if (message.type === 'SEND_EMAIL') {
     sendEmailViaResend(message.apiKey, message.email).then(result => {
-      safeSendResponse(sendResponse, result);
+      // Fire-and-forget: content scripts don't wait for responses
+      // Process email sending in background without blocking
+      console.debug('FormTrack: Email sent successfully', result);
     }).catch(error => {
-      safeSendResponse(sendResponse, { success: false, error: error.message });
+      console.debug('FormTrack: Error sending email', error);
     });
-    return true;
+    // Return false - no response needed, prevents channel closing errors
+    return false;
   }
   
   if (message.type === 'GET_SUBMISSIONS') {
@@ -305,6 +433,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       safeSendResponse(sendResponse, { success: false, error: error.message });
     });
     return true;
+  }
+  
+  if (message.type === 'GENERATE_SUMMARY') {
+    (async () => {
+      try {
+        const result = await chrome.storage.local.get(['settings']);
+        const settings = result.settings || {};
+        
+        if (!settings.geminiApiKey) {
+          // Always attempt to send response, safeSendResponse will handle if callback is invalid
+          safeSendResponse(sendResponse, { success: false, error: 'Gemini API key not configured. Please add it in settings.' });
+          return;
+        }
+        
+        const summaryResult = await generateSummaryWithGemini(
+          settings.geminiApiKey,
+          message.submissions,
+          message.formUrl || null
+        );
+        
+        // Always attempt to send response, safeSendResponse will handle if callback is invalid
+        safeSendResponse(sendResponse, summaryResult);
+      } catch (error) {
+        console.error('FormTrack: Error in GENERATE_SUMMARY handler', error);
+        // Always attempt to send response, safeSendResponse will handle if callback is invalid
+        safeSendResponse(sendResponse, { success: false, error: error.message || 'Unknown error' });
+      }
+    })();
+    
+    return true; // Keep channel open for async response
   }
   
   // Return false if message type is not handled (no async response needed)

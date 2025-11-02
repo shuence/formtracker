@@ -74,12 +74,16 @@ function renderSubmission(submission, index) {
                           submission.url.includes('forms.office.com') ||
                           submission.url.includes('forms.microsoft.com') ||
                           submission.url.includes('forms.office365.com');
+  const isClickUpForm = submission.source === 'clickup-forms' ||
+                        submission.url.includes('forms.clickup.com');
 
   let sourceBadge = '';
   if (isGoogleForm) {
     sourceBadge = '<span class="source-badge google-forms-badge">Google Forms</span>';
   } else if (isMicrosoftForm) {
     sourceBadge = '<span class="source-badge microsoft-forms-badge">Microsoft Forms</span>';
+  } else if (isClickUpForm) {
+    sourceBadge = '<span class="source-badge clickup-forms-badge">ClickUp Forms</span>';
   }
 
   submissionDiv.innerHTML = `
@@ -113,9 +117,24 @@ function renderSubmission(submission, index) {
       ${submission.source ? `
       <div class="details-section">
         <strong>Source:</strong>
-        <div>${submission.source === 'google-forms' ? 'Google Forms' : (submission.source === 'microsoft-forms' ? 'Microsoft Forms' : submission.source)}</div>
+        <div>${submission.source === 'google-forms' ? 'Google Forms' : 
+                (submission.source === 'microsoft-forms' ? 'Microsoft Forms' : 
+                (submission.source === 'clickup-forms' ? 'ClickUp Forms' : submission.source))}</div>
       </div>
       ` : ''}
+      <div class="details-section ai-summary-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <strong>🤖 AI Summary:</strong>
+          <button class="btn-generate-summary" data-submission-index="${index}" title="Generate AI Summary">
+            Generate Summary
+          </button>
+        </div>
+        <div class="ai-summary-content" id="ai-summary-${index}" style="display: none;">
+          <div class="ai-summary-loading" style="display: none;">Generating summary...</div>
+          <div class="ai-summary-text"></div>
+          <div class="ai-summary-error" style="display: none; color: #d32f2f; font-size: 12px; margin-top: 8px;"></div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -131,6 +150,14 @@ function renderSubmission(submission, index) {
     toggleIcon.textContent = isCurrentlyHidden ? '▲' : '▼';
     toggleBtn.setAttribute('aria-expanded', isCurrentlyHidden ? 'true' : 'false');
   });
+
+  // Add AI summary button functionality
+  const generateSummaryBtn = submissionDiv.querySelector('.btn-generate-summary');
+  if (generateSummaryBtn) {
+    generateSummaryBtn.addEventListener('click', async () => {
+      await generateAISummary(index);
+    });
+  }
 
   return submissionDiv;
 }
@@ -257,6 +284,120 @@ function exportSubmissions() {
 }
 
 /**
+ * Generate AI summary for a submission
+ */
+async function generateAISummary(submissionIndex) {
+  const submission = filteredSubmissions[submissionIndex];
+  if (!submission) return;
+
+  const summaryContent = document.getElementById(`ai-summary-${submissionIndex}`);
+  const summaryText = summaryContent?.querySelector('.ai-summary-text');
+  const summaryLoading = summaryContent?.querySelector('.ai-summary-loading');
+  const summaryError = summaryContent?.querySelector('.ai-summary-error');
+  const generateBtn = document.querySelector(`[data-submission-index="${submissionIndex}"]`);
+
+  if (!summaryContent || !summaryText || !summaryLoading || !summaryError) return;
+
+  // Show summary section
+  summaryContent.style.display = 'block';
+  summaryLoading.style.display = 'block';
+  summaryText.style.display = 'none';
+  summaryError.style.display = 'none';
+  summaryText.textContent = '';
+
+  if (generateBtn) {
+    generateBtn.disabled = true;
+    generateBtn.textContent = 'Generating...';
+  }
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'GENERATE_SUMMARY',
+      submissions: [submission],
+      formUrl: submission.url
+    });
+
+    if (response.success && response.summary) {
+      summaryLoading.style.display = 'none';
+      summaryText.style.display = 'block';
+      summaryText.textContent = response.summary;
+      // Format the text nicely
+      summaryText.style.whiteSpace = 'pre-wrap';
+      summaryText.style.lineHeight = '1.6';
+      summaryText.style.color = '#333';
+    } else {
+      summaryLoading.style.display = 'none';
+      summaryError.style.display = 'block';
+      summaryError.textContent = response.error || 'Failed to generate summary';
+    }
+  } catch (error) {
+    console.error('Error generating AI summary:', error);
+    summaryLoading.style.display = 'none';
+    summaryError.style.display = 'block';
+    summaryError.textContent = 'Error: ' + error.message;
+  } finally {
+    if (generateBtn) {
+      generateBtn.disabled = false;
+      generateBtn.textContent = 'Generate Summary';
+    }
+  }
+}
+
+/**
+ * Generate AI summary for all submissions (form analysis)
+ */
+async function generateFormSummary() {
+  if (filteredSubmissions.length === 0) {
+    alert('No submissions to analyze');
+    return;
+  }
+
+  // Show a modal or alert with summary
+  const formUrl = filteredSubmissions[0]?.url || null;
+  
+  try {
+    // Show loading state
+    const summaryText = 'Generating comprehensive form analysis...';
+    if (confirm(`Generate AI summary for ${filteredSubmissions.length} submissions?`)) {
+      const response = await chrome.runtime.sendMessage({
+        type: 'GENERATE_SUMMARY',
+        submissions: filteredSubmissions,
+        formUrl: formUrl
+      });
+
+      if (response.success && response.summary) {
+        // Show summary in a modal or alert
+        const summaryWindow = window.open('', '_blank', 'width=600,height=600');
+        summaryWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>AI Form Summary</title>
+            <style>
+              body { font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }
+              h1 { color: #667eea; }
+              pre { white-space: pre-wrap; background: #f5f5f5; padding: 15px; border-radius: 5px; }
+            </style>
+          </head>
+          <body>
+            <h1>🤖 AI Form Summary</h1>
+            <p><strong>Analyzing ${filteredSubmissions.length} submission(s)</strong></p>
+            <hr>
+            <pre>${response.summary}</pre>
+          </body>
+          </html>
+        `);
+      } else {
+        alert('Error: ' + (response.error || 'Failed to generate summary'));
+      }
+    }
+  } catch (error) {
+    console.error('Error generating form summary:', error);
+    alert('Error: ' + error.message);
+  }
+}
+
+/**
  * Clear all submissions
  */
 async function clearSubmissions() {
@@ -291,6 +432,7 @@ const resendApiKey = document.getElementById('resendApiKey');
 const emailTo = document.getElementById('emailTo');
 const emailFrom = document.getElementById('emailFrom');
 const emailEnabled = document.getElementById('emailEnabled');
+const geminiApiKey = document.getElementById('geminiApiKey');
 // emailOnSubmit removed - now auto-enabled when emailEnabled is true
 
 /**
@@ -302,7 +444,8 @@ async function loadSettings() {
     resendApiKey: '',
     emailTo: '',
     emailFrom: '',
-    emailEnabled: true
+    emailEnabled: true,
+    geminiApiKey: ''
   };
   
   try {
@@ -330,6 +473,11 @@ async function loadSettings() {
     
     // Load email enabled setting (default to true for auto-send)
     emailEnabled.checked = settings.emailEnabled !== undefined ? settings.emailEnabled : true;
+    
+    // Load Gemini API key
+    if (geminiApiKey) {
+      geminiApiKey.value = settings.geminiApiKey || '';
+    }
   } catch (error) {
     console.error('Error loading settings:', error);
     // Set defaults on error
@@ -337,6 +485,9 @@ async function loadSettings() {
     emailTo.value = defaultSettings.emailTo;
     emailFrom.value = defaultSettings.emailFrom;
     emailEnabled.checked = defaultSettings.emailEnabled;
+    if (geminiApiKey) {
+      geminiApiKey.value = defaultSettings.geminiApiKey;
+    }
   }
 }
 
@@ -370,7 +521,8 @@ async function saveSettings() {
       resendApiKey: apiKey,
       emailTo: toEmail,
       emailFrom: fromEmail || null,
-      emailEnabled: emailEnabled.checked // Auto-send when enabled and configured
+      emailEnabled: emailEnabled.checked, // Auto-send when enabled and configured
+      geminiApiKey: geminiApiKey ? geminiApiKey.value.trim() : ''
     };
 
     await chrome.runtime.sendMessage({
@@ -470,6 +622,12 @@ searchInput.addEventListener('input', (e) => {
 exportBtn.addEventListener('click', exportSubmissions);
 
 clearBtn.addEventListener('click', clearSubmissions);
+
+// AI Summary button
+const generateFormSummaryBtn = document.getElementById('generateFormSummaryBtn');
+if (generateFormSummaryBtn) {
+  generateFormSummaryBtn.addEventListener('click', generateFormSummary);
+}
 
 // Load submissions on popup open
 loadSubmissions();

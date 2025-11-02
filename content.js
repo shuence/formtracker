@@ -19,6 +19,65 @@
   ];
 
   /**
+   * Safely send message to background script
+   * Checks if chrome.runtime is available before sending
+   * Handles "Extension context invalidated" errors gracefully
+   */
+  function safeSendMessage(message) {
+    try {
+      // Check if chrome.runtime is available
+      if (typeof chrome === 'undefined' || !chrome.runtime) {
+        console.debug('FormTrack: chrome.runtime not available');
+        return Promise.resolve();
+      }
+      
+      // Check if extension context is still valid by accessing chrome.runtime.id
+      // This will throw if context is invalidated
+      try {
+        const extensionId = chrome.runtime.id;
+        if (!extensionId) {
+          console.debug('FormTrack: Extension context invalidated (no ID)');
+          return Promise.resolve();
+        }
+      } catch (e) {
+        // Context invalidated - accessing chrome.runtime.id threw an error
+        console.debug('FormTrack: Extension context invalidated');
+        return Promise.resolve();
+      }
+      
+      // Check if sendMessage exists
+      if (!chrome.runtime.sendMessage) {
+        console.debug('FormTrack: chrome.runtime.sendMessage not available');
+        return Promise.resolve();
+      }
+      
+      // Attempt to send message
+      return chrome.runtime.sendMessage(message).catch(err => {
+        // Handle specific "Extension context invalidated" error
+        const errorMessage = err?.message || err?.toString() || '';
+        if (errorMessage.includes('Extension context invalidated') || 
+            errorMessage.includes('context invalidated')) {
+          console.debug('FormTrack: Extension context invalidated, message not sent');
+          return Promise.resolve();
+        }
+        // Silently fail if background script isn't ready
+        console.debug('FormTrack: Could not send message', err);
+        return Promise.resolve();
+      });
+    } catch (error) {
+      // Handle "Extension context invalidated" and other errors
+      const errorMessage = error?.message || error?.toString() || '';
+      if (errorMessage.includes('Extension context invalidated') || 
+          errorMessage.includes('context invalidated')) {
+        console.debug('FormTrack: Extension context invalidated');
+      } else {
+        console.debug('FormTrack: Error accessing chrome.runtime', error);
+      }
+      return Promise.resolve();
+    }
+  }
+
+  /**
    * Check if a URL or form action should be ignored
    */
   function shouldIgnore(url, action) {
@@ -123,12 +182,9 @@
     };
     
     // Send to background worker
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'FORM_SUBMISSION',
       data: submission
-    }).catch(err => {
-      // Silently fail if background script isn't ready
-      console.debug('FormTrack: Could not send message', err);
     });
   }
 
@@ -150,6 +206,15 @@
     return (hostname.includes('forms.office.com') ||
             hostname.includes('forms.microsoft.com') ||
             hostname.includes('forms.office365.com'));
+  }
+
+  /**
+   * Check if current page is a ClickUp Form
+   */
+  function isClickUpForm() {
+    const hostname = window.location.hostname.toLowerCase();
+    
+    return hostname.includes('forms.clickup.com');
   }
 
   /**
@@ -307,11 +372,9 @@
         source: 'google-forms'
       };
 
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'FORM_SUBMISSION',
         data: submission
-      }).catch(err => {
-        console.debug('FormTrack: Could not send message', err);
       });
     }
     
@@ -518,11 +581,9 @@
       source: 'microsoft-forms'
     };
 
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       type: 'FORM_SUBMISSION',
       data: submission
-    }).catch(err => {
-      console.debug('FormTrack: Could not send message', err);
     });
   }
 
@@ -579,6 +640,258 @@
   }
 
   /**
+   * Extract data from ClickUp Forms
+   */
+  function extractClickUpFormData() {
+    const formData = {};
+    
+    try {
+      // ClickUp Forms uses React components with various structures
+      // Try multiple selectors for form fields
+      const selectors = [
+        'input[type="text"]',
+        'input[type="email"]',
+        'input[type="number"]',
+        'input[type="tel"]',
+        'input[type="date"]',
+        'input[type="time"]',
+        'input[type="url"]',
+        'textarea',
+        'select',
+        '[role="textbox"]',
+        '[role="combobox"]',
+        '[data-testid]',
+        '[class*="field"]',
+        '[class*="input"]',
+        '[class*="question"]'
+      ];
+
+      // Find all form elements
+      const inputs = document.querySelectorAll('input, textarea, select, [role="textbox"], [role="combobox"]');
+      
+      inputs.forEach((element, index) => {
+        try {
+          let fieldName = null;
+          let fieldValue = null;
+          let questionText = null;
+
+          // Try to get question text (label) - ClickUp Forms uses various structures
+          const fieldContainer = element.closest('[class*="field"], [class*="question"], [class*="form-field"], [data-testid]');
+          const label = fieldContainer?.querySelector('label, [role="heading"], [class*="label"], [class*="title"], [class*="question-title"]') ||
+                       element.previousElementSibling?.tagName === 'LABEL' ? element.previousElementSibling :
+                       element.closest('label')?.previousElementSibling;
+          
+          questionText = label?.textContent?.trim() || 
+                        element.getAttribute('aria-label') || 
+                        element.getAttribute('placeholder') ||
+                        element.getAttribute('name') ||
+                        element.getAttribute('data-testid') ||
+                        `Field ${index + 1}`;
+
+          // Handle different input types
+          if (element.type === 'text' || element.type === 'email' || element.type === 'number' || 
+              element.type === 'tel' || element.type === 'date' || element.type === 'time' || element.type === 'url') {
+            fieldName = element.getAttribute('name') || element.getAttribute('data-testid') || questionText;
+            fieldValue = element.value;
+          } else if (element.type === 'checkbox' || element.type === 'radio') {
+            if (element.checked) {
+              fieldName = element.getAttribute('name') || questionText;
+              fieldValue = element.value || element.getAttribute('aria-label') || element.nextElementSibling?.textContent?.trim() || 'selected';
+              
+              // Group radio buttons and checkboxes by question
+              if (!formData[fieldName]) {
+                formData[fieldName] = [];
+              }
+              if (Array.isArray(formData[fieldName])) {
+                formData[fieldName].push(fieldValue);
+              } else {
+                formData[fieldName] = [formData[fieldName], fieldValue];
+              }
+              return;
+            }
+          } else if (element.tagName === 'TEXTAREA' || element.getAttribute('role') === 'textbox') {
+            fieldName = element.getAttribute('name') || element.getAttribute('data-testid') || questionText;
+            fieldValue = element.value || element.textContent;
+          } else if (element.tagName === 'SELECT' || element.getAttribute('role') === 'combobox') {
+            fieldName = element.getAttribute('name') || element.getAttribute('data-testid') || questionText;
+            fieldValue = element.value;
+          }
+
+          // Only store if we have a name and value
+          if (fieldName && fieldValue !== null && fieldValue !== '') {
+            const key = questionText !== `Field ${index + 1}` ? questionText : fieldName;
+            
+            if (!formData[key]) {
+              formData[key] = fieldValue;
+            } else if (Array.isArray(formData[key])) {
+              formData[key].push(fieldValue);
+            } else {
+              formData[key] = [formData[key], fieldValue];
+            }
+          }
+        } catch (err) {
+          // Skip this element
+        }
+      });
+
+      // Try to extract from ClickUp Forms' internal state
+      try {
+        // ClickUp Forms may store data in window or React state
+        if (window.__CLICKUP_FORM_DATA) {
+          const clickUpData = window.__CLICKUP_FORM_DATA;
+          if (clickUpData && clickUpData.formData) {
+            Object.assign(formData, clickUpData.formData);
+          }
+        }
+      } catch (e) {
+        // Ignore
+      }
+
+      return formData;
+    } catch (err) {
+      console.debug('FormTrack: Error extracting ClickUp Form data', err);
+      return {};
+    }
+  }
+
+  /**
+   * Capture ClickUp Form submission
+   */
+  function captureClickUpFormSubmission() {
+    if (!isClickUpForm()) return;
+    
+    // Try multiple times with delays to capture data
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    function attemptCapture() {
+      attempts++;
+      const formData = extractClickUpFormData();
+      
+      if (Object.keys(formData).length === 0 && attempts < maxAttempts) {
+        // Retry after a short delay
+        setTimeout(attemptCapture, 300);
+        return;
+      }
+      
+      // If still no data after attempts, try to capture from form inputs directly
+      if (Object.keys(formData).length === 0) {
+        // Last resort: capture visible form inputs
+        const allInputs = document.querySelectorAll('input[value]:not([type="submit"]):not([type="button"]), textarea[value], select option:checked');
+        allInputs.forEach(input => {
+          const value = input.value || input.textContent;
+          const name = input.getAttribute('name') || 
+                      input.getAttribute('data-testid') || 
+                      input.getAttribute('aria-label') || 
+                      input.closest('[class*="field"]')?.querySelector('[class*="label"]')?.textContent ||
+                      `Field_${Object.keys(formData).length + 1}`;
+          if (value && value.trim()) {
+            formData[name] = value;
+          }
+        });
+      }
+      
+      if (Object.keys(formData).length === 0) {
+        console.debug('FormTrack: No ClickUp Form data captured');
+        return;
+      }
+
+      const submission = {
+        url: window.location.href,
+        action: window.location.href,
+        timestamp: new Date().toISOString(),
+        fields: formData,
+        title: document.title || 'ClickUp Form',
+        source: 'clickup-forms'
+      };
+
+      safeSendMessage({
+        type: 'FORM_SUBMISSION',
+        data: submission
+      });
+    }
+    
+    attemptCapture();
+  }
+
+  /**
+   * Monitor ClickUp Forms submit button
+   */
+  function setupClickUpFormMonitoring() {
+    if (!isClickUpForm()) return;
+
+    // Watch for submit button clicks - expanded selectors for ClickUp Forms
+    const submitButtonSelectors = [
+      'button[type="submit"]',
+      '[data-testid*="submit"]',
+      '[data-testid*="Submit"]',
+      '[class*="submit"]',
+      '[class*="Submit"]',
+      '[aria-label*="Submit"], [aria-label*="submit"]',
+      '[role="button"][aria-label*="Submit"]',
+      'button[class*="button"]:not([type="button"])',
+      '[class*="submit-button"]',
+      '[class*="submitButton"]'
+    ];
+
+    function attachListeners() {
+      submitButtonSelectors.forEach(selector => {
+        try {
+          const buttons = document.querySelectorAll(selector);
+          buttons.forEach(button => {
+            // Check if button text indicates submit action
+            const buttonText = button.textContent?.toLowerCase() || '';
+            const isSubmitButton = buttonText.includes('submit') || 
+                                   buttonText.includes('send') ||
+                                   button.type === 'submit' ||
+                                   button.getAttribute('aria-label')?.toLowerCase().includes('submit');
+            
+            if (isSubmitButton && !button.dataset.formtrackWatched) {
+              button.dataset.formtrackWatched = 'true';
+              // Use capture phase to intercept early
+              button.addEventListener('click', (e) => {
+                console.debug('FormTrack: ClickUp Form submit button clicked');
+                // Capture immediately and also after delay
+                setTimeout(captureClickUpFormSubmission, 100);
+                setTimeout(captureClickUpFormSubmission, 500);
+                setTimeout(captureClickUpFormSubmission, 1000);
+              }, true);
+              
+              // Also listen for mousedown for better coverage
+              button.addEventListener('mousedown', () => {
+                setTimeout(captureClickUpFormSubmission, 300);
+              }, true);
+            }
+          });
+        } catch (err) {
+          // Some selectors might fail, ignore
+        }
+      });
+    }
+
+    const observer = new MutationObserver(() => {
+      attachListeners();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'data-testid', 'role', 'aria-label']
+    });
+
+    // Check immediately and repeatedly
+    attachListeners();
+    
+    // Check periodically for new buttons
+    setInterval(() => {
+      if (isClickUpForm()) {
+        attachListeners();
+      }
+    }, 1000);
+  }
+
+  /**
    * Handle programmatic form submissions (AJAX, fetch, etc.)
    */
   function interceptFetch() {
@@ -592,7 +905,7 @@
           options.body) {
         
         try {
-          // Special handling for Google Forms and Microsoft Forms
+          // Special handling for Google Forms, Microsoft Forms, and ClickUp Forms
           const urlStr = typeof url === 'string' ? url : url.toString();
           const isGoogleFormsEndpoint = urlStr.includes('forms/d/e/') || 
                                         urlStr.includes('forms/u/0/d/e/') ||
@@ -603,6 +916,10 @@
                                           urlStr.includes('/api/form/') ||
                                           urlStr.includes('/api/Response') ||
                                           urlStr.includes('/SubmitForm');
+          const isClickUpFormsEndpoint = urlStr.includes('forms.clickup.com') ||
+                                        urlStr.includes('/api/form/') ||
+                                        urlStr.includes('/form/submit') ||
+                                        urlStr.includes('/submit-form');
 
           if (isGoogleFormsEndpoint) {
             // Capture Google Form submission with multiple attempts
@@ -623,6 +940,20 @@
             setTimeout(() => {
               captureMicrosoftFormSubmission();
             }, 300);
+          }
+
+          if (isClickUpFormsEndpoint) {
+            // Capture ClickUp Form submission
+            console.debug('FormTrack: ClickUp Forms endpoint detected');
+            setTimeout(() => {
+              captureClickUpFormSubmission();
+            }, 200);
+            setTimeout(() => {
+              captureClickUpFormSubmission();
+            }, 800);
+            setTimeout(() => {
+              captureClickUpFormSubmission();
+            }, 1500);
           }
 
           // Try to parse body as form data or JSON
@@ -688,13 +1019,15 @@
               timestamp: new Date().toISOString(),
               fields: formData,
               title: document.title || 'Untitled Page',
-              source: isGoogleFormsEndpoint ? 'google-forms' : (isMicrosoftFormsEndpoint ? 'microsoft-forms' : 'fetch')
+              source: isGoogleFormsEndpoint ? 'google-forms' : 
+                      (isMicrosoftFormsEndpoint ? 'microsoft-forms' : 
+                      (isClickUpFormsEndpoint ? 'clickup-forms' : 'fetch'))
             };
             
-            chrome.runtime.sendMessage({
+            safeSendMessage({
               type: 'FORM_SUBMISSION',
               data: submission
-            }).catch(() => {});
+            });
           }
         } catch (err) {
           // Silently fail
@@ -706,7 +1039,7 @@
   }
 
   /**
-   * Intercept XMLHttpRequest for Google Forms and Microsoft Forms
+   * Intercept XMLHttpRequest for Google Forms, Microsoft Forms, and ClickUp Forms
    */
   function interceptXHR() {
     const originalOpen = XMLHttpRequest.prototype.open;
@@ -733,8 +1066,12 @@
                                         urlStr.includes('/api/form/') ||
                                         urlStr.includes('/api/Response') ||
                                         urlStr.includes('/SubmitForm');
+        const isClickUpFormsEndpoint = urlStr.includes('forms.clickup.com') ||
+                                      urlStr.includes('/api/form/') ||
+                                      urlStr.includes('/form/submit') ||
+                                      urlStr.includes('/submit-form');
 
-        if ((isGoogleFormsEndpoint || isMicrosoftFormsEndpoint) && data) {
+        if ((isGoogleFormsEndpoint || isMicrosoftFormsEndpoint || isClickUpFormsEndpoint) && data) {
           try {
             let formData = {};
             
@@ -777,14 +1114,14 @@
                   action: urlStr,
                   timestamp: new Date().toISOString(),
                   fields: formData,
-                  title: document.title || (isMicrosoftFormsEndpoint ? 'Microsoft Form' : 'Google Form'),
-                  source: isMicrosoftFormsEndpoint ? 'microsoft-forms' : 'google-forms'
+                  title: document.title || (isMicrosoftFormsEndpoint ? 'Microsoft Form' : (isClickUpFormsEndpoint ? 'ClickUp Form' : 'Google Form')),
+                  source: isMicrosoftFormsEndpoint ? 'microsoft-forms' : (isClickUpFormsEndpoint ? 'clickup-forms' : 'google-forms')
                 };
 
-                chrome.runtime.sendMessage({
+                safeSendMessage({
                   type: 'FORM_SUBMISSION',
                   data: submission
-                }).catch(() => {});
+                });
               }, 200);
             }
 
@@ -792,6 +1129,12 @@
             if (isMicrosoftFormsEndpoint) {
               setTimeout(() => {
                 captureMicrosoftFormSubmission();
+              }, 300);
+            }
+
+            if (isClickUpFormsEndpoint) {
+              setTimeout(() => {
+                captureClickUpFormSubmission();
               }, 300);
             }
           } catch (err) {
@@ -839,11 +1182,22 @@
       }, 1000);
     }
 
-    // Re-check for Google Forms and Microsoft Forms periodically (for dynamically loaded content)
+    // Setup ClickUp Forms specific monitoring
+    if (isClickUpForm()) {
+      setupClickUpFormMonitoring();
+      
+      // Also try to capture immediately if form is already loaded
+      setTimeout(() => {
+        setupClickUpFormMonitoring();
+      }, 1000);
+    }
+
+    // Re-check for Google Forms, Microsoft Forms, and ClickUp Forms periodically (for dynamically loaded content)
     if (window.location.hostname.includes('docs.google.com') || 
         window.location.hostname.includes('forms.office.com') ||
         window.location.hostname.includes('forms.microsoft.com') ||
-        window.location.hostname.includes('forms.office365.com')) {
+        window.location.hostname.includes('forms.office365.com') ||
+        window.location.hostname.includes('forms.clickup.com')) {
       setInterval(() => {
         if (isGoogleForm() && document.querySelector('[role="button"][aria-label*="Submit"]')) {
           setupGoogleFormMonitoring();
@@ -851,12 +1205,16 @@
         if (isMicrosoftForm() && document.querySelector('[role="button"][aria-label*="Submit"], button[type="submit"]')) {
           setupMicrosoftFormMonitoring();
         }
+        if (isClickUpForm() && document.querySelector('button[type="submit"], [role="button"][aria-label*="Submit"], button[class*="submit"]')) {
+          setupClickUpFormMonitoring();
+        }
       }, 2000);
     }
     
     const detected = [];
     if (isGoogleForm()) detected.push('Google Forms');
     if (isMicrosoftForm()) detected.push('Microsoft Forms');
+    if (isClickUpForm()) detected.push('ClickUp Forms');
     console.log('FormTrack: Content script loaded', detected.length > 0 ? `(${detected.join(', ')} detected)` : '');
   }
 

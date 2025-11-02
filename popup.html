@@ -38,6 +38,9 @@
 
     <div class="stats">
       <span id="statsText">Loading...</span>
+      <button id="generateFormSummaryBtn" class="btn btn-secondary" style="margin-left: auto; font-size: 12px; padding: 4px 8px;" title="Generate AI Summary for All Submissions">
+        🤖 AI Summary
+      </button>
     </div>
 
     <div id="submissionsList" class="submissions-list">
@@ -121,6 +124,26 @@
           <button id="testEmailBtn" class="btn btn-secondary" style="width: 100%; margin-top: 10px;">
             Test Email
           </button>
+        </div>
+
+        <div class="setting-section" style="margin-top: 24px;">
+          <h3>🤖 AI Summaries (Gemini API)</h3>
+          <p class="setting-description">
+            Configure Google Gemini API to generate AI-powered summaries of your form submissions.
+          </p>
+          
+          <div class="form-group">
+            <label for="geminiApiKey">Gemini API Key</label>
+            <input 
+              type="password" 
+              id="geminiApiKey" 
+              class="setting-input" 
+              placeholder="AIzaSyxxxxxxxxxxxxxxxxxxxxx"
+            />
+            <small class="setting-hint">
+              Get your API key from <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>
+            </small>
+          </div>
         </div>
       </div>
     </div>
