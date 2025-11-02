@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FormTrack</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1 class="title">
+        <span class="icon">📋</span>
+        FormTrack
+      </h1>
+      <div class="header-actions">
+        <button id="settingsBtn" class="btn btn-secondary" title="Settings">
+          ⚙️
+        </button>
+        <button id="exportBtn" class="btn btn-secondary" title="Export as JSON">
+          Export
+        </button>
+        <button id="clearBtn" class="btn btn-danger" title="Clear all submissions">
+          Clear
+        </button>
+      </div>
+    </header>
+
+    <div class="search-container">
+      <input 
+        type="text" 
+        id="searchInput" 
+        class="search-input" 
+        placeholder="Search by URL, title, or field..."
+      />
+      <span class="search-icon">🔍</span>
+    </div>
+
+    <div class="stats">
+      <span id="statsText">Loading...</span>
+    </div>
+
+    <div id="submissionsList" class="submissions-list">
+      <div class="loading">Loading submissions...</div>
+    </div>
+
+    <div id="emptyState" class="empty-state" style="display: none;">
+      <div class="empty-icon">📝</div>
+      <h2>No submissions yet</h2>
+      <p>FormTrack will automatically capture form submissions as you browse.</p>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button id="closeSettingsBtn" class="modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-section">
+          <h3>📧 Email Notifications (Resend API)</h3>
+          <p class="setting-description">
+            Configure Resend API to receive email notifications when forms are submitted.
+          </p>
+          
+          <div class="form-group">
+            <label for="resendApiKey">Resend API Key</label>
+            <input 
+              type="password" 
+              id="resendApiKey" 
+              class="setting-input" 
+              placeholder="re_xxxxxxxxxxxxx"
+            />
+            <small class="setting-hint">
+              Get your API key from <a href="https://resend.com/api-keys" target="_blank">resend.com/api-keys</a>
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="emailTo">Send Emails To</label>
+            <input 
+              type="email" 
+              id="emailTo" 
+              class="setting-input" 
+              placeholder="your-email@example.com"
+            />
+            <small class="setting-hint">
+              Email address where notifications will be sent
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="emailFrom">From Email (Optional)</label>
+            <input 
+              type="email" 
+              id="emailFrom" 
+              class="setting-input" 
+              placeholder="noreply@yourdomain.com"
+            />
+            <small class="setting-hint">
+              Must be verified in your Resend domain. Leave empty to use default.
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="emailEnabled" checked />
+              Enable email notifications (Auto-send when configured)
+            </label>
+            <small class="setting-hint">
+              When API key and email are configured, emails will be sent automatically on form submissions
+            </small>
+          </div>
+
+          <button id="saveSettingsBtn" class="btn btn-primary" style="width: 100%; margin-top: 10px;">
+            Save Settings
+          </button>
+
+          <button id="testEmailBtn" class="btn btn-secondary" style="width: 100%; margin-top: 10px;">
+            Test Email
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FormTrack Test Form</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      color: #333;
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    label.required::after {
+      content: " *";
+      color: #d32f2f;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="tel"],
+    input[type="number"],
+    input[type="date"],
+    select,
+    textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    .checkbox-group,
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .checkbox-item,
+    .radio-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .checkbox-item input[type="checkbox"],
+    .radio-item input[type="radio"] {
+      width: auto;
+      margin: 0;
+    }
+
+    .checkbox-item label,
+    .radio-item label {
+      margin: 0;
+      font-weight: normal;
+      cursor: pointer;
+    }
+
+    .inline-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 30px;
+    }
+
+    button {
+      flex: 1;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    button[type="submit"] {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    button[type="submit"]:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    button[type="reset"] {
+      background: #f5f5f5;
+      color: #666;
+    }
+
+    button[type="reset"]:hover {
+      background: #e0e0e0;
+    }
+
+    .info-box {
+      background: #e3f2fd;
+      border-left: 4px solid #2196f3;
+      padding: 12px 16px;
+      margin-bottom: 25px;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #1976d2;
+    }
+
+    .info-box strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📋 FormTrack Test Form</h1>
+    <p class="subtitle">Fill out this form and submit to test FormTrack extension</p>
+
+    <div class="info-box">
+      <strong>💡 Testing Instructions:</strong>
+      Fill out this form and click "Submit" - then check the FormTrack extension popup to see if your submission was captured!
+    </div>
+
+    <form id="testForm" action="/submit" method="POST">
+      <!-- Basic Text Fields -->
+      <div class="form-group">
+        <label for="fullName" class="required">Full Name</label>
+        <input type="text" id="fullName" name="fullName" placeholder="Enter your full name" required>
+      </div>
+
+      <div class="form-group">
+        <label for="email" class="required">Email Address</label>
+        <input type="email" id="email" name="email" placeholder="your.email@example.com" required>
+      </div>
+
+      <div class="inline-group">
+        <div class="form-group">
+          <label for="phone">Phone Number</label>
+          <input type="tel" id="phone" name="phone" placeholder="+1 (555) 123-4567">
+        </div>
+
+        <div class="form-group">
+          <label for="age">Age</label>
+          <input type="number" id="age" name="age" placeholder="25" min="1" max="120">
+        </div>
+      </div>
+
+      <!-- Select Dropdown -->
+      <div class="form-group">
+        <label for="country" class="required">Country</label>
+        <select id="country" name="country" required>
+          <option value="">Select a country</option>
+          <option value="us">United States</option>
+          <option value="uk">United Kingdom</option>
+          <option value="ca">Canada</option>
+          <option value="au">Australia</option>
+          <option value="in">India</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+
+      <!-- Radio Buttons -->
+      <div class="form-group">
+        <label class="required">Gender</label>
+        <div class="radio-group">
+          <div class="radio-item">
+            <input type="radio" id="gender-male" name="gender" value="male" required>
+            <label for="gender-male">Male</label>
+          </div>
+          <div class="radio-item">
+            <input type="radio" id="gender-female" name="gender" value="female">
+            <label for="gender-female">Female</label>
+          </div>
+          <div class="radio-item">
+            <input type="radio" id="gender-other" name="gender" value="other">
+            <label for="gender-other">Other</label>
+          </div>
+          <div class="radio-item">
+            <input type="radio" id="gender-prefer-not" name="gender" value="prefer-not">
+            <label for="gender-prefer-not">Prefer not to say</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Checkboxes -->
+      <div class="form-group">
+        <label class="required">Interests (select all that apply)</label>
+        <div class="checkbox-group">
+          <div class="checkbox-item">
+            <input type="checkbox" id="interest-tech" name="interests" value="technology">
+            <label for="interest-tech">Technology</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="interest-design" name="interests" value="design">
+            <label for="interest-design">Design</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="interest-business" name="interests" value="business">
+            <label for="interest-business">Business</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="interest-marketing" name="interests" value="marketing">
+            <label for="interest-marketing">Marketing</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" id="interest-education" name="interests" value="education">
+            <label for="interest-education">Education</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Date Input -->
+      <div class="form-group">
+        <label for="birthdate">Birth Date</label>
+        <input type="date" id="birthdate" name="birthdate">
+      </div>
+
+      <!-- Textarea -->
+      <div class="form-group">
+        <label for="message">Message / Bio</label>
+        <textarea id="message" name="message" placeholder="Tell us about yourself..."></textarea>
+      </div>
+
+      <!-- Hidden Field (for testing) -->
+      <input type="hidden" name="formType" value="test-form">
+      <input type="hidden" name="timestamp" id="timestamp">
+
+      <!-- Submit Buttons -->
+      <div class="button-group">
+        <button type="submit">Submit Form</button>
+        <button type="reset">Reset</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    // Set timestamp on form load
+    document.getElementById('timestamp').value = new Date().toISOString();
+
+    // Handle form submission
+    document.getElementById('testForm').addEventListener('submit', function(e) {
+      e.preventDefault(); // Prevent actual submission for testing
+      
+      // Show alert
+      alert('✅ Form submitted! Check the FormTrack extension popup to see if your submission was captured.\n\nNote: This form prevents actual submission for testing purposes.');
+      
+      // Optionally, you can create a fake submission via fetch to test AJAX capture
+      console.log('Form data captured:', new FormData(this));
+      
+      return false;
+    });
+
+    // Handle form reset
+    document.getElementById('testForm').addEventListener('reset', function() {
+      console.log('Form reset');
+    });
+  </script>
+</body>
+</html>
+
